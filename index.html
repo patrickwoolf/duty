@@ -272,7 +272,8 @@ function generateTable() {
   const dim = dates.length;
   const firstDayWeek = new Date(year, month - 1, 1).getDay();
 
-  let html = '<table><thead><tr>';
+  let html = '<table border="1" cellspacing="0" cellpadding="4">';
+  html += '<thead><tr>';
   ['一', '二', '三', '四', '五', '六', '日'].forEach(d => {
     html += `<th>周${d}</th>`;
   });
@@ -290,15 +291,26 @@ function generateTable() {
       if (cellIndex < emptyCells || dateNum > dim) {
         html += '<td></td>';
       } else {
+        html += `<td><strong>${dateNum}</strong></td>`;
+      }
+    }
+    html += '</tr><tr>';
+    for (let wd = 0; wd < 7; wd++) {
+      const cellIndex = w * 7 + wd;
+      const dateNum = cellIndex - emptyCells + 1;
+      if (cellIndex < emptyCells || dateNum > dim) {
+        html += '<td></td>';
+      } else {
         const d = String(dateNum).padStart(2, '0');
         const p = daily[d] ? daily[d].split('_')[1] : '';
-        html += `<td><strong>${dateNum}</strong><br>${p}</td>`;
+        html += `<td>${p}</td>`;
       }
     }
     html += '</tr>';
   }
 
   html += '</tbody></table>';
+
   document.getElementById('tableOutput').innerHTML = html;
 }
 </script>
