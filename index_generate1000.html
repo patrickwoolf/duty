@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>自動排班工具</title>
+  <style>
+    body { max-width: 900px; margin: auto; font-family: sans-serif; line-height: 1.6; }
+    textarea { width: 100%; padding: 8px; margin-bottom: 12px; font-size: 1em; }
+    label { font-weight: bold; margin-top: 8px; display: block; }
+    pre { background: #f4f4f4; padding: 12px; overflow-x: auto; white-space: pre-wrap; }
+    button { padding: 10px 20px; font-size: 1em; margin-right: 8px; }
+    table { border-collapse: collapse; text-align: center; margin-top: 20px; width: 100%; }
+    th, td { border: 1px solid #999; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>📅 自動排班工具</h1>
+
+  <label>年份</label>
+  <textarea id="year" rows="1">2025</textarea>
+
+  <label>月份</label>
+  <textarea id="month" rows="1">8</textarea>
+
+  <label>職級人員</label>
+  <textarea id="staffInput" rows="5">R2: AAA, BBB, CCC, DDD
+R3: EEE, FFF, GGG, HHH
+R4: III, JJJ, KKK</textarea>
+
+  <label>預值班</label>
+  <textarea id="preAssignInput" rows="2">AAA: 5, 10; III: 6;</textarea>
+
+  <label>不能排班日</label>
+  <textarea id="unavailableInput" rows="2">CCC: 8, 9;</textarea>
+
+  <label>不排假日名單</label>
+  <textarea id="noWeekendInput" rows="1">FFF, III</textarea>
+
+  <label>歷史點數</label>
+  <textarea id="historyPointsInput" rows="1">AAA: 1; CCC: 2;</textarea>
+
+  <label>點數上限</label>
+  <textarea id="maxPointsInput" rows="1">R2: 5; R3: 4; R4: 3</textarea>
+
+  <label>平日上限</label>
+  <textarea id="weekdayLimitInput" rows="1">AAA: 2;</textarea>
+
+  <label>假日上限</label>
+  <textarea id="weekendLimitInput" rows="1">CCC: 1;</textarea>
+
+  <label>假日班排班順序</label>
+  <textarea id="weekendOrderInput" rows="1">R4, R3, R2, R2</textarea>
+
+  <label>平日班排班順序</label>
+  <textarea id="weekdayOrderInput" rows="1">R2, R3, R4, R2</textarea>
+
+  <label>本月特定日期點數</label>
+  <textarea id="monthlyPointsInput" rows="1">5: 2, 10: 1, 15: 2</textarea>
+
+  <button onclick="runScheduler()">執行排班</button>
+  <button onclick="generateTable()">產生表格</button>
+
+  <h2>📋 排班結果</h2>
+  <pre id="output">請點選「執行排班」</pre>
+
+  <div id="tableOutput"></div>
+
+<script>
+function parseNameDays(str) {
+  const result = {};
+  const parts = str.split(';');
+  for (let part of parts) {
+    if (!part.trim()) continue;
+    const [name, days] = part.split(':');
+    if (!name || !days) continue;
+    result[name.trim()] = days.split(',').map(d => d.trim().padStart(2, '0'));
+  }
+  return result;
+}
+
+function parseLevelNames(str) {
+  const result = {};
+  const lines = str.split('\n');
+  for (let line of lines) {
+    const [level, names] = line.split(':');
+    if (!level || !names) continue;
+    result[level.trim()] = names.split(',').map(n => `${level.trim()}_${n.trim()}`);
+  }
+  return result;
+}
+
+function parseMaxPoints(str) {
+  const result = {};
+  const parts = str.split(';');
+  for (let part of parts) {
+    const [level, val] = part.split(':');
+    if (!level || !val) continue;
+    result[level.trim()] = parseInt(val);
+  }
+  return result;
+}
+
+function parseOrderInput(str) {
+  return str.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function parseDatePoints(str) {
+  const result = {};
+  str.split(',').forEach(part => {
+    const [date, val] = part.split(':').map(s => s.trim());
+    if (date && val) {
+      result[date.padStart(2, '0')] = parseInt(val);
+    }
+  });
+  return result;
+}
+
+function shuffle(array) {
+  for (let i = array.length -1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i +1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+function calculateStats(schedule, staffLevels, year, month, monthlyPoints, noWeekend) {
+  const pts = d => {
+    if (monthlyPoints.hasOwnProperty(d)) return monthlyPoints[d];
+    const day = new Date(year, month - 1, parseInt(d)).getDay();
+    return (day === 0 || day === 6) ? 2 : 1;
+  };
+  const isWeekend = d => {
+    const day = new Date(year, month - 1, parseInt(d)).getDay();
+    return day === 0 || day === 6;
+  };
+
+  const allStaff = Object.values(staffLevels).flat();
+  const stats = {};
+  allStaff.forEach(p => stats[p.split('_')[1]] = { totalPts: 0, weekday: 0, weekend: 0 });
+
+  for (const d in schedule) {
+    const p = schedule[d];
+    const shortName = p.split('_')[1];
+    if (!stats[shortName]) continue;
+    stats[shortName].totalPts += pts(d);
+    if (isWeekend(d)) stats[shortName].weekend++;
+    else stats[shortName].weekday++;
+  }
+  return stats;
+}
+
+
+// ======= runScheduler 函式 =======
+function runScheduler() {
+  const year = +document.getElementById('year').value.trim();
+  const month = +document.getElementById('month').value.trim();
+  const dim = new Date(year, month, 0).getDate();
+  const dates = Array.from({ length: dim }, (_, i) => String(i + 1).padStart(2, '0'));
+
+  const staffLevels = parseLevelNames(document.getElementById('staffInput').value);
+  const preAssign = parseNameDays(document.getElementById('preAssignInput').value);
+  const unavailable = parseNameDays(document.getElementById('unavailableInput').value);
+  const noWeekend = new Set(document.getElementById('noWeekendInput').value.split(',').map(n => n.trim()));
+  const historyPointsRaw = parseNameDays(document.getElementById('historyPointsInput').value);
+  const maxPoints = parseMaxPoints(document.getElementById('maxPointsInput').value);
+  const weekdayLimit = parseMaxPoints(document.getElementById('weekdayLimitInput').value);
+  const weekendLimit = parseMaxPoints(document.getElementById('weekendLimitInput').value);
+  const weekendOrder = parseOrderInput(document.getElementById('weekendOrderInput').value);
+  const weekdayOrder = parseOrderInput(document.getElementById('weekdayOrderInput').value);
+  const monthlyPoints = parseDatePoints(document.getElementById('monthlyPointsInput').value);
+
+  const allStaff = Object.values(staffLevels).flat();
+  const nameMap = {};
+  allStaff.forEach(n => nameMap[n.split('_')[1]] = n);
+
+  const isWeekend = d => {
+    const day = new Date(year, month - 1, parseInt(d)).getDay();
+    return day === 0 || day === 6;
+  };
+
+  const pts = d => {
+    if (monthlyPoints.hasOwnProperty(d)) return monthlyPoints[d];
+    return isWeekend(d) ? 2 : 1;
+  };
+
+  const generateOneSchedule = () => {
+    const daily = {};
+    const assigned = {};
+    const used = new Set();
+
+    const historyPoints = {};
+    for (const k in historyPointsRaw) historyPoints[k] = historyPointsRaw[k].length;
+
+    allStaff.forEach(p => assigned[p] = { dates: [], pts: 0, we: 0, wd: 0 });
+
+    for (const name in preAssign) {
+      const staff = nameMap[name];
+      if (!staff) continue;
+      preAssign[name].forEach(d => {
+        if (used.has(d)) return;
+        daily[d] = staff;
+        assigned[staff].dates.push(d);
+        assigned[staff].pts += pts(d);
+        isWeekend(d) ? assigned[staff].we++ : assigned[staff].wd++;
+        used.add(d);
+      });
+    }
+
+    const canAssign = (p, d) => {
+      const shortName = p.split('_')[1];
+      if (used.has(d)) return false;
+      if (preAssign[shortName]?.includes(d)) return false;
+      if (unavailable[shortName]?.includes(d)) return false;
+      if (assigned[p].dates.some(dd => Math.abs(parseInt(dd) - parseInt(d)) <= 2)) return false;
+      if (assigned[p].pts + pts(d) > maxPoints[p.slice(0, 2)]) return false;
+      if (isWeekend(d) && noWeekend.has(shortName)) return false;
+      if (isWeekend(d)) {
+        if (shortName in weekendLimit && assigned[p].we >= weekendLimit[shortName]) return false;
+      } else {
+        if (shortName in weekdayLimit && assigned[p].wd >= weekdayLimit[shortName]) return false;
+      }
+      return true;
+    };
+
+    const assignOnceByLevelSequence = (sequence, isWeekendRequired) => {
+      for (const level of sequence) {
+        const group = staffLevels[level] || [];
+        for (let p of group) {
+          const already = assigned[p].dates.some(d => isWeekend(d) === isWeekendRequired);
+          if (already) continue;
+          const pick = dates.find(d => !used.has(d) && isWeekend(d) === isWeekendRequired && canAssign(p, d));
+          if (pick) {
+            daily[pick] = p;
+            used.add(pick);
+            assigned[p].dates.push(pick);
+            assigned[p].pts += pts(pick);
+            isWeekend(pick) ? assigned[p].we++ : assigned[p].wd++;
+          }
+        }
+      }
+    };
+
+    for (const level in staffLevels) shuffle(staffLevels[level]);
+    shuffle(allStaff);
+
+    assignOnceByLevelSequence(weekendOrder, true);
+    assignOnceByLevelSequence(weekdayOrder, false);
+
+    for (let d of dates) {
+      if (used.has(d)) continue;
+      for (let p of allStaff) {
+        if (canAssign(p, d)) {
+          daily[d] = p;
+          assigned[p].dates.push(d);
+          assigned[p].pts += pts(d);
+          isWeekend(d) ? assigned[p].we++ : assigned[p].wd++;
+          used.add(d);
+          break;
+        }
+      }
+    }
+
+    return daily;
+  };
+
+  // ====== 產生 3 組有效排班 ======
+  let results = [];
+  const maxAttempts = 1000;
+  let attempts = 0;
+
+  while (results.length < 3 && attempts < maxAttempts) {
+    attempts++;
+    const schedule = generateOneSchedule();
+    if (Object.keys(schedule).length === dates.length) results.push(schedule);
+  }
+
+  let output = '';
+  if (results.length === 0) {
+    output = '⚠️ 無法找到沒有「無法排班」的排班結果。';
+  } else {
+    results.forEach((res, idx) => {
+      output += `\n\n🔶 第 ${idx + 1} 組有效排班\n`;
+      dates.forEach(d => output += `${d} ➤ ${res[d].split('_')[1]}\n`);
+    
+      // 計算點數與平日/假日班數
+      const stats = calculateStats(res, staffLevels, year, month, monthlyPoints, noWeekend);
+      output += '\n人員統計 (總點數 / 平日班 / 假日班)\n';
+      for (const name in stats) {
+        const s = stats[name];
+        output += `${name} ➤ ${s.totalPts} / ${s.weekday} / ${s.weekend}\n`;
+      }
+    });
+  }
+
+  document.getElementById('output').textContent = output;
+  document.getElementById('tableOutput').innerHTML = '';
+}
+
+// ====== 產生表格 ======
+
+function generateTable() {
+  const outputText = document.getElementById('output').textContent;
+  if (!outputText.includes('第 1 組有效排班')) return;
+  const lines = outputText.split('\n').filter(l => l.includes('➤'));
+  let html = '<table><tr><th>日期</th><th>人員</th></tr>';
+  lines.forEach(line => {
+    const [date, name] = line.split('➤').map(s => s.trim());
+    html += `<tr><td>${date}</td><td>${name}</td></tr>`;
+  });
+  html += '</table>';
+  document.getElementById('tableOutput').innerHTML = html;
+}
+
+</script>
+</body>
+</html>
