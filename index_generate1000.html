@@ -20,7 +20,7 @@
   <textarea id="year" rows="1">2025</textarea>
 
   <label>月份</label>
-  <textarea id="month" rows="1">8</textarea>
+  <textarea id="month" rows="1">12</textarea>
 
   <label>職級人員</label>
   <textarea id="staffInput" rows="5">R2: AAA, BBB, CCC, DDD
@@ -33,12 +33,6 @@ R4: III, JJJ, KKK</textarea>
   <label>不能排班日</label>
   <textarea id="unavailableInput" rows="2">CCC: 8, 9;</textarea>
 
-  <label>不排假日名單</label>
-  <textarea id="noWeekendInput" rows="1">FFF, III</textarea>
-
-  <label>歷史點數</label>
-  <textarea id="historyPointsInput" rows="1">AAA: 1; CCC: 2;</textarea>
-
   <label>點數上限</label>
   <textarea id="maxPointsInput" rows="1">R2: 5; R3: 4; R4: 3</textarea>
 
@@ -47,12 +41,6 @@ R4: III, JJJ, KKK</textarea>
 
   <label>假日上限</label>
   <textarea id="weekendLimitInput" rows="1">CCC: 1;</textarea>
-
-  <label>假日班排班順序</label>
-  <textarea id="weekendOrderInput" rows="1">R4, R3, R2, R2</textarea>
-
-  <label>平日班排班順序</label>
-  <textarea id="weekdayOrderInput" rows="1">R2, R3, R4, R2</textarea>
 
   <label>本月特定日期點數</label>
   <textarea id="monthlyPointsInput" rows="1">5: 2, 10: 1, 15: 2</textarea>
@@ -66,6 +54,34 @@ R4: III, JJJ, KKK</textarea>
   <div id="tableOutput"></div>
 
 <script>
+/* ------------ localStorage：自動記住欄位內容 -------------- */
+const fields = [
+  "year", "month", "staffInput", "preAssignInput", "unavailableInput",
+  "maxPointsInput", "weekdayLimitInput", "weekendLimitInput", "monthlyPointsInput"
+];
+
+function loadSavedFields() {
+  fields.forEach(id => {
+    const saved = localStorage.getItem("scheduler_" + id);
+    if (saved !== null) document.getElementById(id).value = saved;
+  });
+}
+
+function enableAutoSave() {
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener("input", () => {
+      localStorage.setItem("scheduler_" + id, el.value);
+    });
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadSavedFields();
+  enableAutoSave();
+});
+/* ----------------------------------------------------------- */
+
 function parseNameDays(str) {
   const result = {};
   const parts = str.split(';');
@@ -100,10 +116,6 @@ function parseMaxPoints(str) {
   return result;
 }
 
-function parseOrderInput(str) {
-  return str.split(',').map(s => s.trim()).filter(Boolean);
-}
-
 function parseDatePoints(str) {
   const result = {};
   str.split(',').forEach(part => {
@@ -122,7 +134,7 @@ function shuffle(array) {
   }
 }
 
-function calculateStats(schedule, staffLevels, year, month, monthlyPoints, noWeekend) {
+function calculateStats(schedule, staffLevels, year, month, monthlyPoints) {
   const pts = d => {
     if (monthlyPoints.hasOwnProperty(d)) return monthlyPoints[d];
     const day = new Date(year, month - 1, parseInt(d)).getDay();
@@ -135,21 +147,19 @@ function calculateStats(schedule, staffLevels, year, month, monthlyPoints, noWee
 
   const allStaff = Object.values(staffLevels).flat();
   const stats = {};
-  allStaff.forEach(p => stats[p.split('_')[1]] = { totalPts: 0, weekday: 0, weekend: 0 });
+  allStaff.forEach(p =>
+    stats[p.split('_')[1]] = { totalPts: 0, weekday: 0, weekend: 0 }
+  );
 
   for (const d in schedule) {
     const p = schedule[d];
     const shortName = p.split('_')[1];
-    if (!stats[shortName]) continue;
     stats[shortName].totalPts += pts(d);
-    if (isWeekend(d)) stats[shortName].weekend++;
-    else stats[shortName].weekday++;
+    isWeekend(d) ? stats[shortName].weekend++ : stats[shortName].weekday++;
   }
   return stats;
 }
 
-
-// ======= runScheduler 函式 =======
 function runScheduler() {
   const year = +document.getElementById('year').value.trim();
   const month = +document.getElementById('month').value.trim();
@@ -159,13 +169,10 @@ function runScheduler() {
   const staffLevels = parseLevelNames(document.getElementById('staffInput').value);
   const preAssign = parseNameDays(document.getElementById('preAssignInput').value);
   const unavailable = parseNameDays(document.getElementById('unavailableInput').value);
-  const noWeekend = new Set(document.getElementById('noWeekendInput').value.split(',').map(n => n.trim()));
-  const historyPointsRaw = parseNameDays(document.getElementById('historyPointsInput').value);
+
   const maxPoints = parseMaxPoints(document.getElementById('maxPointsInput').value);
   const weekdayLimit = parseMaxPoints(document.getElementById('weekdayLimitInput').value);
   const weekendLimit = parseMaxPoints(document.getElementById('weekendLimitInput').value);
-  const weekendOrder = parseOrderInput(document.getElementById('weekendOrderInput').value);
-  const weekdayOrder = parseOrderInput(document.getElementById('weekdayOrderInput').value);
   const monthlyPoints = parseDatePoints(document.getElementById('monthlyPointsInput').value);
 
   const allStaff = Object.values(staffLevels).flat();
@@ -187,11 +194,9 @@ function runScheduler() {
     const assigned = {};
     const used = new Set();
 
-    const historyPoints = {};
-    for (const k in historyPointsRaw) historyPoints[k] = historyPointsRaw[k].length;
-
     allStaff.forEach(p => assigned[p] = { dates: [], pts: 0, we: 0, wd: 0 });
 
+    // 先排預值班
     for (const name in preAssign) {
       const staff = nameMap[name];
       if (!staff) continue;
@@ -212,7 +217,7 @@ function runScheduler() {
       if (unavailable[shortName]?.includes(d)) return false;
       if (assigned[p].dates.some(dd => Math.abs(parseInt(dd) - parseInt(d)) <= 2)) return false;
       if (assigned[p].pts + pts(d) > maxPoints[p.slice(0, 2)]) return false;
-      if (isWeekend(d) && noWeekend.has(shortName)) return false;
+
       if (isWeekend(d)) {
         if (shortName in weekendLimit && assigned[p].we >= weekendLimit[shortName]) return false;
       } else {
@@ -221,32 +226,12 @@ function runScheduler() {
       return true;
     };
 
-    const assignOnceByLevelSequence = (sequence, isWeekendRequired) => {
-      for (const level of sequence) {
-        const group = staffLevels[level] || [];
-        for (let p of group) {
-          const already = assigned[p].dates.some(d => isWeekend(d) === isWeekendRequired);
-          if (already) continue;
-          const pick = dates.find(d => !used.has(d) && isWeekend(d) === isWeekendRequired && canAssign(p, d));
-          if (pick) {
-            daily[pick] = p;
-            used.add(pick);
-            assigned[p].dates.push(pick);
-            assigned[p].pts += pts(pick);
-            isWeekend(pick) ? assigned[p].we++ : assigned[p].wd++;
-          }
-        }
-      }
-    };
-
     for (const level in staffLevels) shuffle(staffLevels[level]);
     shuffle(allStaff);
 
-    assignOnceByLevelSequence(weekendOrder, true);
-    assignOnceByLevelSequence(weekdayOrder, false);
-
     for (let d of dates) {
       if (used.has(d)) continue;
+
       for (let p of allStaff) {
         if (canAssign(p, d)) {
           daily[d] = p;
@@ -262,7 +247,6 @@ function runScheduler() {
     return daily;
   };
 
-  // ====== 產生 3 組有效排班 ======
   let results = [];
   const maxAttempts = 1000;
   let attempts = 0;
@@ -275,14 +259,13 @@ function runScheduler() {
 
   let output = '';
   if (results.length === 0) {
-    output = '⚠️ 無法找到沒有「無法排班」的排班結果。';
+    output = '⚠️ 無法找到有效排班結果。';
   } else {
     results.forEach((res, idx) => {
       output += `\n\n🔶 第 ${idx + 1} 組有效排班\n`;
       dates.forEach(d => output += `${d} ➤ ${res[d].split('_')[1]}\n`);
     
-      // 計算點數與平日/假日班數
-      const stats = calculateStats(res, staffLevels, year, month, monthlyPoints, noWeekend);
+      const stats = calculateStats(res, staffLevels, year, month, monthlyPoints);
       output += '\n人員統計 (總點數 / 平日班 / 假日班)\n';
       for (const name in stats) {
         const s = stats[name];
@@ -294,8 +277,6 @@ function runScheduler() {
   document.getElementById('output').textContent = output;
   document.getElementById('tableOutput').innerHTML = '';
 }
-
-// ====== 產生表格 ======
 
 function generateTable() {
   const outputText = document.getElementById('output').textContent;
@@ -309,7 +290,6 @@ function generateTable() {
   html += '</table>';
   document.getElementById('tableOutput').innerHTML = html;
 }
-
 </script>
 </body>
 </html>
