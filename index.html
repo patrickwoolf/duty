@@ -13,37 +13,37 @@
     th, td { border: 1px solid #999; padding: 8px; }
   </style>
 </head>
-<body>
+<body onload="loadInputs()">
   <h1>📅 自動排班工具</h1>
 
   <label>年份</label>
-  <textarea id="year" rows="1">2025</textarea>
+  <textarea id="year" rows="1" oninput="saveInput(this.id)">2025</textarea>
 
   <label>月份</label>
-  <textarea id="month" rows="1">8</textarea>
+  <textarea id="month" rows="1" oninput="saveInput(this.id)">8</textarea>
 
   <label>職級人員</label>
-  <textarea id="staffInput" rows="5">R2: AAA, BBB, CCC, DDD
+  <textarea id="staffInput" rows="5" oninput="saveInput(this.id)">R2: AAA, BBB, CCC, DDD
 R3: EEE, FFF, GGG, HHH
 R4: III, JJJ, KKK</textarea>
 
   <label>預值班</label>
-  <textarea id="preAssignInput" rows="2">AAA: 5, 10; III: 6;</textarea>
+  <textarea id="preAssignInput" rows="2" oninput="saveInput(this.id)">AAA: 5, 10; III: 6;</textarea>
 
   <label>不能排班日</label>
-  <textarea id="unavailableInput" rows="2">CCC: 8, 9;</textarea>
+  <textarea id="unavailableInput" rows="2" oninput="saveInput(this.id)">CCC: 8, 9;</textarea>
 
   <label>點數上限</label>
-  <textarea id="maxPointsInput" rows="1">R2: 5; R3: 4; R4: 3</textarea>
+  <textarea id="maxPointsInput" rows="1" oninput="saveInput(this.id)">R2: 5; R3: 4; R4: 3</textarea>
 
   <label>平日上限</label>
-  <textarea id="weekdayLimitInput" rows="1">AAA: 2;</textarea>
+  <textarea id="weekdayLimitInput" rows="1" oninput="saveInput(this.id)">AAA: 2;</textarea>
 
   <label>假日上限</label>
-  <textarea id="weekendLimitInput" rows="1">CCC: 1;</textarea>
+  <textarea id="weekendLimitInput" rows="1" oninput="saveInput(this.id)">CCC: 1;</textarea>
 
   <label>本月特定日期點數</label>
-  <textarea id="monthlyPointsInput" rows="1">5: 2, 10: 1, 15: 2</textarea>
+  <textarea id="monthlyPointsInput" rows="1" oninput="saveInput(this.id)">5: 2, 10: 1, 15: 2</textarea>
 
   <button onclick="runScheduler()">執行排班</button>
   <button onclick="generateTable()">產生表格</button>
@@ -54,6 +54,24 @@ R4: III, JJJ, KKK</textarea>
   <div id="tableOutput"></div>
 
 <script>
+/* ------------------ 儲存與載入輸入內容 ------------------ */
+function saveInput(id) {
+  localStorage.setItem("sched_" + id, document.getElementById(id).value);
+}
+
+function loadInputs() {
+  const ids = [
+    "year","month","staffInput","preAssignInput","unavailableInput",
+    "maxPointsInput","weekdayLimitInput","weekendLimitInput","monthlyPointsInput"
+  ];
+  ids.forEach(id => {
+    const saved = localStorage.getItem("sched_" + id);
+    if (saved !== null) document.getElementById(id).value = saved;
+  });
+}
+
+/* ------------------ 你的排班原始功能 ------------------ */
+
 function parseNameDays(str) {
   const result = {};
   const parts = str.split(';');
@@ -92,9 +110,7 @@ function parseDatePoints(str) {
   const result = {};
   str.split(',').forEach(part => {
     const [date, val] = part.split(':').map(s => s.trim());
-    if (date && val) {
-      result[date.padStart(2, '0')] = parseInt(val);
-    }
+    if (date && val) result[date.padStart(2, '0')] = parseInt(val);
   });
   return result;
 }
@@ -134,8 +150,7 @@ function runScheduler() {
 
   const pts = d => {
     if (monthlyPoints.hasOwnProperty(d)) return monthlyPoints[d];
-    const day = new Date(year, month - 1, parseInt(d)).getDay();
-    return (day === 0 || day === 6) ? 2 : 1;
+    return isWeekend(d) ? 2 : 1;
   };
 
   const allStaff = Object.values(staffLevels).flat();
@@ -203,8 +218,8 @@ function runScheduler() {
   for (const level in staffLevels) {
     output += `\n== ${level} ==\n`;
     staffLevels[level].forEach(p => {
-      const short = p.split('_')[1];
       const a = assigned[p];
+      const short = p.split('_')[1];
       output += `${short}: ${a.pts} 點（平${a.wd}, 假${a.we}） → [${a.dates.join(', ')}]\n`;
     });
   }
@@ -224,7 +239,7 @@ function generateTable() {
 
   let html = '<table border="1" cellspacing="0" cellpadding="4">';
   html += '<thead><tr>';
-  ['一', '二', '三', '四', '五', '六', '日'].forEach(d => {
+  ['一','二','三','四','五','六','日'].forEach(d => {
     html += `<th>周${d}</th>`;
   });
   html += '</tr></thead><tbody>';
@@ -236,19 +251,17 @@ function generateTable() {
   for (let w = 0; w < weeks; w++) {
     html += '<tr>';
     for (let wd = 0; wd < 7; wd++) {
-      const cellIndex = w * 7 + wd;
-      const dateNum = cellIndex - emptyCells + 1;
-      if (cellIndex < emptyCells || dateNum > dim) {
-        html += '<td></td>';
-      } else {
-        html += `<td><strong>${dateNum}</strong></td>`;
-      }
+      const idx = w * 7 + wd;
+      const dateNum = idx - emptyCells + 1;
+      html += (idx < emptyCells || dateNum > dim)
+        ? '<td></td>'
+        : `<td><strong>${dateNum}</strong></td>`;
     }
     html += '</tr><tr>';
     for (let wd = 0; wd < 7; wd++) {
-      const cellIndex = w * 7 + wd;
-      const dateNum = cellIndex - emptyCells + 1;
-      if (cellIndex < emptyCells || dateNum > dim) {
+      const idx = w * 7 + wd;
+      const dateNum = idx - emptyCells + 1;
+      if (idx < emptyCells || dateNum > dim) {
         html += '<td></td>';
       } else {
         const d = String(dateNum).padStart(2, '0');
@@ -260,7 +273,6 @@ function generateTable() {
   }
 
   html += '</tbody></table>';
-
   document.getElementById('tableOutput').innerHTML = html;
 }
 </script>
