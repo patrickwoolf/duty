@@ -51,6 +51,9 @@ R4: III, JJJ, KKK</textarea>
   <h2>📋 排班結果</h2>
   <pre id="output">請點選「執行排班」</pre>
 
+  <h2>🔁 迴圈次數</h2>
+  <pre id="attemptOutput">尚未執行</pre>
+  
   <div id="tableOutput"></div>
 
 <script>
@@ -257,6 +260,9 @@ function runScheduler() {
     if (Object.keys(schedule).length === dates.length) results.push(schedule);
   }
 
+  document.getElementById('attemptOutput').textContent = 
+  `找到結果總共花了 ${attempts} 次迴圈`;
+  
   let output = '';
   if (results.length === 0) {
     output = '⚠️ 無法找到有效排班結果。';
